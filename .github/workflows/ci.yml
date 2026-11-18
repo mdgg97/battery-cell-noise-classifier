@@ -1,0 +1,47 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install tools
+        run: |
+          sudo apt-get update && sudo apt-get install -y valgrind
+          pip install pytest numpy
+
+      - name: Build (strict warnings, -Werror)
+        run: make all
+
+      - name: Unit tests (C)
+        run: make unit
+
+      - name: SIL tests (pytest)
+        run: make sil
+
+      - name: Optimisation levels -O0..-Os
+        run: make optlevels
+
+      - name: ASan + UBSan
+        run: make sanitize
+
+      - name: Valgrind
+        run: make memcheck
+
+      - name: No heap / no float in src
+        run: make lint
+
+      - name: Requirements traceability
+        run: make trace
+
+      - name: Coverage
+        run: make coverage

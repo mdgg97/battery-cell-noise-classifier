@@ -1,0 +1,110 @@
+{
+  "_about": "Edge cases proposed with GenAI assistance (Claude) from docs/requirements.md and include/cell_noise.h, then executed and triaged. status 'pass' = must hold; 'known_limitation' = expected behaviour is NOT met today, tracked in docs/limitations.md, run as strict xfail so a fix is noticed.",
+  "cases": [
+    {
+      "id": "GA-01",
+      "title": "Very quiet cell, noise below one ADC LSB",
+      "rationale": "With 100 uV LSB, a real but very quiet cell can produce identical codes for a whole window. Does STUCK fire on a healthy cell?",
+      "signal": {"noise_rms_uv": 20, "seed": 0},
+      "expected": "OK",
+      "status": "known_limitation",
+      "ref": "L1"
+    },
+    {
+      "id": "GA-02",
+      "title": "Inverter ripple coupled into the sense line",
+      "rationale": "Periodic interference has no single outlier but raises RMS; must be noise, not spike or drift.",
+      "signal": {"hum_amp_uv": 1500, "hum_cycles": 5, "seed": 0},
+      "expected": "ELEVATED_NOISE",
+      "status": "pass"
+    },
+    {
+      "id": "GA-03",
+      "title": "Interference synchronous to the sample rate (aliasing)",
+      "rationale": "If the disturbance frequency is a multiple of the sampling frequency, every sample sees the same phase.",
+      "signal": {"hum_amp_uv": 3000, "hum_cycles": 64, "seed": 0},
+      "expected": "ELEVATED_NOISE",
+      "status": "known_limitation",
+      "ref": "L2"
+    },
+    {
+      "id": "GA-04",
+      "title": "Slow voltage relaxation after a load step",
+      "rationale": "A slow exponential is almost linear over the window and should be reported as a trend.",
+      "signal": {"exp_step_uv": 8000, "exp_tau": 60, "seed": 0},
+      "expected": "DRIFT",
+      "status": "pass"
+    },
+    {
+      "id": "GA-05",
+      "title": "Fast voltage relaxation after a load step",
+      "rationale": "A fast exponential is strongly curved; a linear detrend leaves the curvature in the residuals.",
+      "signal": {"exp_step_uv": 8000, "exp_tau": 10, "seed": 0},
+      "expected": "DRIFT",
+      "status": "known_limitation",
+      "ref": "L3"
+    },
+    {
+      "id": "GA-06",
+      "title": "Single spike in the shortest allowed window (n = 8)",
+      "rationale": "In short windows one outlier has large leverage on the regression line and can inflate all other residuals.",
+      "signal": {"n": 8, "spikes": {"4": 10000}, "seed": 0},
+      "expected": "SPIKE",
+      "status": "pass",
+      "finding": "DEF-001: was classified ELEVATED_NOISE; fixed by a robust refit without outliers"
+    },
+    {
+      "id": "GA-07",
+      "title": "Two adjacent spikes (EMI burst of two samples)",
+      "rationale": "Two consecutive outliers are still within spike_max_count and must not be treated as broadband noise.",
+      "signal": {"spikes": {"30": 10000, "31": 10000}, "seed": 0},
+      "expected": "SPIKE",
+      "status": "pass"
+    },
+    {
+      "id": "GA-08",
+      "title": "Spike on the first sample of a drifting window",
+      "rationale": "The first sample has the highest leverage; spike and drift must both be reported.",
+      "signal": {"drift_uv": 8000, "spikes": {"0": 12000}, "seed": 0},
+      "expected": "SPIKE",
+      "expected_flags": ["SPIKE", "DRIFT"],
+      "status": "pass"
+    },
+    {
+      "id": "GA-09",
+      "title": "Fully charged cell sitting exactly at v_max",
+      "rationale": "Noise makes about half the samples exceed v_max. The classifier has no hysteresis by design; debouncing belongs to the caller.",
+      "signal": {"base_uv": 4300000, "seed": 0},
+      "expected": "OUT_OF_RANGE",
+      "status": "pass"
+    },
+    {
+      "id": "GA-10",
+      "title": "Step change when cell balancing switches on mid-window",
+      "rationale": "Balancing current causes a sudden IR drop of a few mV. There is no STEP class; current behaviour is pinned here.",
+      "signal": {"step_at": 32, "step_uv": -3000, "seed": 0},
+      "expected": "ELEVATED_NOISE",
+      "expected_flags": ["ELEVATED_NOISE", "DRIFT"],
+      "status": "pass",
+      "ref": "L4"
+    },
+    {
+      "id": "GA-11",
+      "title": "Opposite spikes on both ends of a short window",
+      "rationale": "End points have maximum leverage; the fitted line can follow both outliers so neither looks like an outlier (masking).",
+      "signal": {"n": 8, "spikes": {"0": 10000, "7": -10000}, "seed": 0},
+      "expected": "SPIKE",
+      "status": "known_limitation",
+      "ref": "L5"
+    },
+    {
+      "id": "GA-12",
+      "title": "Intermittent open wire (every other sample reads 0 V)",
+      "rationale": "A loose connector can alternate between valid and zero readings; range check must win over noise.",
+      "raw_alternate": [37000, 0],
+      "signal": {"n": 64},
+      "expected": "OUT_OF_RANGE",
+      "status": "pass"
+    }
+  ]
+}
