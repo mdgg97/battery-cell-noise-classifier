@@ -34,8 +34,19 @@ limit; the window is classified `ELEVATED_NOISE` instead of `SPIKE`.
 *Mitigation options:* a robust estimator (for example median of first differences, or
 Theil–Sen slope), at the cost of more CPU time.
 
+## L6 — Resistance depends on the time scale (cell_ir)
+The post window includes fast polarisation, so R is larger than the pure ohmic value
+and depends on window length and sample rate. Compare R values only for the same
+window settings. Pinned by `test_polarisation_inflates_resistance`.
+
+## L7 — 10 mA balancing current is not enough with 64-sample windows (cell_ir)
+The 0.4 mV step gives about 6.5 % uncertainty, above the 5 % gate, so no window is
+accepted. Options: longer windows, averaging over several balancing events, or more
+current. Pinned by `test_precision_versus_balancing_current`.
+
 ## Fixed defects
 
 | ID | Found by | Description | Fix |
 |----|----------|-------------|-----|
+| DEF-002 | `test_switch_fault_never_reported_ok` | A broken balancing switch was reported `UNCERTAIN` instead of `NO_RESPONSE` in about 1 of 40 windows: noise alone exceeded the 2σ threshold. | Physical plausibility check `r_min_uohm` (default R_bol / 2) in addition to the statistical test. |
 | DEF-001 | GA-06 | A single spike in an 8-sample window was classified `ELEVATED_NOISE`: the spike bent the fitted line and inflated every other residual. | Robust refit: outliers are removed and the clean RMS is computed against a second fit (`src/cell_noise.c`, pass 3). Regression test: GA-06. |

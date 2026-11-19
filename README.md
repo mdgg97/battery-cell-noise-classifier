@@ -34,6 +34,42 @@ if (cnc_classify(samples, 64, &cfg, &res) == CNC_STATUS_OK) {
 }
 ```
 
+### Internal resistance and State of Health (`cell_ir`)
+
+When the firmware switches passive balancing on, the bleed current I pulls the
+cell voltage down by dV = I x R. Averaging the samples before and after the step
+gives R, its uncertainty, and a resistance-based SoH:
+
+```
+SoH_R = (R_eol - R) / (R_eol - R_bol)      defaults: R_bol = 40 mOhm, R_eol = 80 mOhm
+```
+
+A value is only reported as valid when it can be trusted: enough current, both
+windows clean (the noise classifier is the quality gate), uncertainty below 5 %,
+and a physically plausible drop. Otherwise the quality code says why
+(`LOW_CURRENT`, `NOISY_WINDOW`, `NO_RESPONSE`, `UNCERTAIN`).
+
+Precision versus balancing current (simulated, 40 mOhm cell, 150 µV noise,
+64 + 64 samples, 500 runs each):
+
+| Balancing current | Voltage step | Median uncertainty of R | Windows accepted |
+|---|---|---|---|
+| 10 mA | 0.4 mV | 6.5 % | 0 % |
+| 20 mA | 0.8 mV | 3.2 % | 100 % |
+| 50 mA | 2.0 mV | 1.3 % | 100 % |
+| 100 mA | 4.0 mV | 0.7 % | 100 % |
+| 200 mA | 8.0 mV | 0.3 % | 100 % |
+
+A smaller current makes the measurement *less* precise: the voltage step shrinks
+while the noise stays. The reported uncertainty is checked to be honest: 94.8 % of
+the errors lie within ±2σ (target 95 %).
+
+Pitfalls covered by tests:
+- with AFE-internal balancing the current flows through the sense wire, so the wire
+  resistance looks like ageing; it must be calibrated and set in `r_wire_uohm`
+- the value depends on the time scale of the post window (ohmic + polarisation)
+- a broken balancing switch is reported as `NO_RESPONSE`, never as a SoH value
+
 ### Embedded design choices
 - integer only, no heap, no recursion, O(n) — checked by `make lint`
 - freestanding: no libc headers needed
@@ -68,14 +104,15 @@ requirements.md ──► unit tests (C)        hand-built signals, boundaries, 
 | Flash / stack on the target | `make arm-report` |
 | Everything | `make test` |
 
-Current status: 23 C unit tests (on the host and on Cortex-M4), 95 SIL tests + 4 strict
+Current status: 37 C unit tests (on the host and on Cortex-M4), 108 SIL tests + 4 strict
 `xfail` (known limitations), 100 % line coverage, all requirements traced.
 
 ### On the target (Cortex-M4, arm-none-eabi-gcc -Os, from CI)
 
 | Resource | Value |
 |----------|-------|
-| Flash (library) | 1.8 KB |
+| Flash (noise classifier) | 1.8 KB |
+| Flash (internal resistance) | see CI step summary |
 | Static RAM | 0 bytes |
 | Worst-case stack | about 300 bytes (`cnc_classify` 224 + `fit_line` 72) |
 | 64-bit divisions per 256-sample window | 8 (was 515) |
@@ -106,8 +143,9 @@ make test
 ## Repository layout
 
 ```
-include/cell_noise.h        public API
-src/cell_noise.c            implementation
+include/cell_noise.h        noise classifier API
+include/cell_ir.h           internal resistance / SoH API
+src/                        implementation
 tests/unit/                 C unit tests (no external framework)
 tests/sil/                  pytest SIL tests, signal generator, reference model, GenAI cases
 target/                     Cortex-M4 startup code and linker script (QEMU mps2-an386)
@@ -118,6 +156,7 @@ docs/                       requirements, limitations, GenAI test design
 
 ## Next steps
 - measure execution time on a real board (STM32 Nucleo) and add a hardware-in-the-loop test
-- internal resistance from step changes as a State-of-Health indicator
+- trend of R over many balancing events (filtering, temperature compensation)
+- validate R against an impedance or DC-pulse measurement on a real 18650 cell
 - `STEP` class for balancing events (L4)
 - robust slope estimator against end-point masking (L5)

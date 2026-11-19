@@ -26,6 +26,18 @@ test sources for these IDs and fails CI if a requirement has no test.
 | REQ-020 | Mean, peak-to-peak, RMS and drift shall match a floating-point reference model within ±2 µV (back-to-back test). |
 | REQ-021 | Over 500 random clean windows (σ = 150 µV) the false-alarm rate shall be 0 %. |
 
+## Internal resistance and SoH (`cell_ir`)
+
+| ID | Requirement |
+|----|-------------|
+| REQ-040 | `cir_estimate` shall reject NULL pointers, inconsistent configurations and windows with fewer than 8 samples before or after the step; on error the result is INVALID with all values zero. |
+| REQ-041 | R shall be computed as -dV / I from the means of the windows before and after the balancing step; the guard samples after the step shall be excluded. |
+| REQ-042 | The configured sense-wire resistance shall be subtracted from the measured resistance. |
+| REQ-043 | SoH shall be (R_eol - R) / (R_eol - R_bol), in permille, clamped to 0..1000. |
+| REQ-044 | A result shall be accepted (quality OK) only if the current is at least `min_current_ua`, both windows classify OK with the noise classifier, and sigma(R)/R is at most `max_rel_sigma_permille`. |
+| REQ-045 | A missing or implausible voltage drop (below 2 sigma, wrong direction, or R below `r_min_uohm`) shall be reported as NO_RESPONSE, never as a valid SoH. |
+| REQ-046 | The reported uncertainty shall be honest: over 1000 noisy windows, 92–98 % of the errors lie within ±2 sigma, and the estimate is unbiased. |
+
 ## Embedded constraints
 
 | ID | Requirement |

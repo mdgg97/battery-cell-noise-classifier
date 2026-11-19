@@ -320,7 +320,7 @@ static void test_class_names(void)
 /* Each test starts from the default configuration. */
 #define RUN(fn, req) do { cnc_default_config(&cfg); MT_RUN(fn, req); } while (0)
 
-int main(void)
+int run_noise_tests(void)
 {
     printf("cell_noise unit tests\n\n");
     RUN(test_isqrt_values,                      "REQ-031");
