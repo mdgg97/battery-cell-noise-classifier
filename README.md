@@ -36,7 +36,10 @@ if (cnc_classify(samples, 64, &cfg, &res) == CNC_STATUS_OK) {
 
 ### Embedded design choices
 - integer only, no heap, no recursion, O(n) — checked by `make lint`
-- exact least-squares detrend in 64-bit fixed point, with a documented overflow budget
+- freestanding: no libc headers needed
+- least-squares detrend in 64-bit fixed point (Q18), with a documented overflow budget
+- per-sample work uses only multiply and shift: a 256-sample window needs 8 64-bit
+  divisions instead of 515 (Cortex-M has no 64-bit divide instruction)
 - robust refit without outliers, so one spike does not look like broadband noise
 - fail-safe: any error returns class `INVALID`, never `OK`
 
@@ -60,10 +63,24 @@ requirements.md ──► unit tests (C)        hand-built signals, boundaries, 
 | Valgrind | `make memcheck` |
 | Line/branch coverage (gcov) | `make coverage` |
 | Requirements traceability | `make trace` |
+| 64-bit divisions per window are constant | `make divcount` |
+| Unit tests on Cortex-M4 (QEMU mps2-an386) | `make arm qemu` |
+| Flash / stack on the target | `make arm-report` |
 | Everything | `make test` |
 
-Current status: 23 C unit tests, 95 SIL tests + 4 strict `xfail` (known limitations),
-100 % line coverage, all requirements traced.
+Current status: 23 C unit tests (on the host and on Cortex-M4), 95 SIL tests + 4 strict
+`xfail` (known limitations), 100 % line coverage, all requirements traced.
+
+### On the target (Cortex-M4, arm-none-eabi-gcc -Os, from CI)
+
+| Resource | Value |
+|----------|-------|
+| Flash (library) | 1.8 KB |
+| Static RAM | 0 bytes |
+| Worst-case stack | about 300 bytes (`cnc_classify` 224 + `fit_line` 72) |
+| 64-bit divisions per 256-sample window | 8 (was 515) |
+
+QEMU is not cycle-accurate, so execution time still needs a real board.
 
 ### GenAI-assisted testing
 An LLM was given only the requirements and the API and asked for risky edge cases
@@ -80,6 +97,7 @@ Details: [`docs/genai-test-design.md`](docs/genai-test-design.md)
 ## Build
 
 Requirements: gcc, make, Python 3.10+, `pip install pytest numpy`, optionally valgrind.
+For the target: `gcc-arm-none-eabi`, `libnewlib-arm-none-eabi`, `qemu-system-arm`.
 
 ```bash
 make test
@@ -92,11 +110,14 @@ include/cell_noise.h        public API
 src/cell_noise.c            implementation
 tests/unit/                 C unit tests (no external framework)
 tests/sil/                  pytest SIL tests, signal generator, reference model, GenAI cases
+target/                     Cortex-M4 startup code and linker script (QEMU mps2-an386)
 tools/trace_matrix.py       requirements → tests matrix
+tools/count_divisions.py    REQ-034 check: 64-bit divisions per window
 docs/                       requirements, limitations, GenAI test design
 ```
 
 ## Next steps
-- run the same unit tests on a Cortex-M target (QEMU) to cover target-specific behaviour
+- measure execution time on a real board (STM32 Nucleo) and add a hardware-in-the-loop test
+- internal resistance from step changes as a State-of-Health indicator
 - `STEP` class for balancing events (L4)
 - robust slope estimator against end-point masking (L5)
