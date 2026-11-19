@@ -34,3 +34,5 @@ test sources for these IDs and fails CI if a requirement has no test.
 | REQ-031 | No 64-bit overflow for any input within the allowed length and full 16-bit sample range. |
 | REQ-032 | The code shall compile without warnings with `-Wall -Wextra -Wpedantic -Wconversion -Werror` (C99). |
 | REQ-033 | The test suite shall run without memory errors under Valgrind. |
+| REQ-034 | The number of 64-bit divisions per window shall be constant, independent of the window length (Cortex-M has no 64-bit divide instruction). |
+| REQ-035 | The library shall build freestanding (no libc headers) and the unit tests shall pass on a Cortex-M4 target (QEMU mps2-an386). |

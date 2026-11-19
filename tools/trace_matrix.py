@@ -15,6 +15,8 @@ CHECKED_BY_TOOLING = {
     "REQ-030": "make lint",
     "REQ-032": "Makefile -Werror",
     "REQ-033": "make memcheck",
+    "REQ-034": "make divcount",
+    "REQ-035": "make arm qemu (CI)",
 }
 
 

@@ -45,3 +45,28 @@ jobs:
 
       - name: Coverage
         run: make coverage
+
+      - name: 64-bit divisions per window are constant (REQ-034)
+        run: make divcount
+
+  target:
+    name: Cortex-M4 on QEMU
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install ARM toolchain and QEMU
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-arm-none-eabi libnewlib-arm-none-eabi qemu-system-arm
+
+      - name: Build library (freestanding) and unit tests for Cortex-M4
+        run: make arm
+
+      - name: Run unit tests on QEMU mps2-an386 (REQ-035)
+        run: make qemu
+
+      - name: Size and stack report
+        run: |
+          make arm-report | tee report.txt
+          { echo '### Cortex-M4 resource usage'; echo '```'; cat report.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"

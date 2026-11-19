@@ -10,16 +10,22 @@
  *   4. robust refit without outliers          clean_rms()
  *   5. findings -> class                      evaluate_flags(), class_from_flags()
  *
- * Integer-only, no heap. Overflow budget (n <= 256, y <= 65535 LSB):
- *   D = n*Sxx - Sx^2         <= 3.6e8
- *   y*n*D                    <= 6.1e15
- *   bnum*(n*i - Sx)          <= 1.8e16
- *   residual numerator * 100 <= 1.9e18   (< INT64_MAX = 9.2e18)
+ * Integer-only, no heap. Per-sample work uses only multiplications and
+ * shifts: the fitted line is converted once per fit into Q18 fixed point, so
+ * a Cortex-M does not call the slow 64-bit software division (__aeabi_ldivmod)
+ * for every sample.
+ *
+ * Overflow budget (n <= 256, y <= 65535 LSB, Q18 = 2^18 = 262144):
+ *   |bnum| = |m*Sxy - Sx*Sy|      <= 1.4e11
+ *   bnum * 100 * 2^18             <= 3.7e18   (< INT64_MAX = 9.2e18)
+ *   y * 100 * 2^18                <= 1.8e12
+ *   slope_q18 * |m*i - Sx|        <= 1.8e12
  * The same bounds hold for any subset of the samples.
+ * Fixed-point error of a residual: <= 0.07 uV before rounding to 1 uV.
  */
 #include "cell_noise.h"
 
-#include <string.h>
+/* No libc dependency: the library builds freestanding (-ffreestanding, no <string.h>). */
 
 /* ---- defaults: Li-ion NMC cell ------------------------------------------ */
 
@@ -36,6 +42,9 @@
 
 /* ---- small helpers ------------------------------------------------------ */
 
+#define Q18_SHIFT 18
+#define Q18_ONE   ((int64_t)1 << Q18_SHIFT)
+
 /* Round-half-away-from-zero division, den > 0. */
 static int64_t div_round(int64_t num, int64_t den)
 {
@@ -43,6 +52,15 @@ static int64_t div_round(int64_t num, int64_t den)
         return (num + den / 2) / den;
     }
     return -((-num + den / 2) / den);
+}
+
+/* Q18 -> integer, rounded half away from zero; shifts only, no division. */
+static int64_t q18_round(int64_t v)
+{
+    if (v >= 0) {
+        return (v + Q18_ONE / 2) >> Q18_SHIFT;
+    }
+    return -((-v + Q18_ONE / 2) >> Q18_SHIFT);
 }
 
 static uint32_t abs_u32(int64_t v)
@@ -99,13 +117,14 @@ typedef struct {
     int64_t sy;     /* sum of y */
     int64_t d;      /* m*Sxx - Sx^2 (> 0 for m >= 2) */
     int64_t bnum;   /* m*Sxy - Sx*Sy; slope = bnum / d */
-    int64_t scale;  /* m*d */
+    int64_t mean_q18;  /* mean in uV, Q18 */
+    int64_t slope_q18; /* uV per unit of (m*i - Sx), Q18: fitted(i) = mean + slope*(m*i - Sx) */
 } line_fit_t;
 
 /* Fit a line through (i, samples[i]) for every i not in @p excluded (may be NULL). */
 static line_fit_t fit_line(const uint16_t *samples, size_t n, const sample_set_t *excluded)
 {
-    line_fit_t f = {0, 0, 0, 0, 0, 0};
+    line_fit_t f = {0, 0, 0, 0, 0, 0, 0};
     int64_t sxx = 0;
     int64_t sxy = 0;
 
@@ -123,17 +142,18 @@ static line_fit_t fit_line(const uint16_t *samples, size_t n, const sample_set_t
     }
     f.d = f.m * sxx - f.sx * f.sx;
     f.bnum = f.m * sxy - f.sx * f.sy;
-    f.scale = f.m * f.d;
+    /* the only divisions of the fit: once per window, not once per sample */
+    f.mean_q18  = div_round(f.sy * (int64_t)CNC_LSB_UV * Q18_ONE, f.m);
+    f.slope_q18 = div_round(f.bnum * (int64_t)CNC_LSB_UV * Q18_ONE, f.m * f.d);
     return f;
 }
 
-/* Residual of sample i against the line, in microvolts (rounded). */
+/* Residual of sample i against the line, in microvolts (rounded). No division. */
 static int64_t residual_uv(const line_fit_t *f, size_t i, uint16_t y)
 {
-    const int64_t num = (int64_t)y * f->scale
-                      - f->sy * f->d
-                      - f->bnum * (f->m * (int64_t)i - f->sx);
-    return div_round(num * (int64_t)CNC_LSB_UV, f->scale);
+    const int64_t y_q18 = (int64_t)y * (int64_t)CNC_LSB_UV * Q18_ONE;
+    const int64_t fitted_q18 = f->mean_q18 + f->slope_q18 * (f->m * (int64_t)i - f->sx);
+    return q18_round(y_q18 - fitted_q18);
 }
 
 static uint32_t fit_mean_uv(const line_fit_t *f)
@@ -300,14 +320,14 @@ cnc_status_t cnc_classify(const uint16_t *samples, size_t n,
 {
     const cnc_status_t st = validate_request(samples, n, cfg, out);
     if (out != NULL) {
-        memset(out, 0, sizeof(*out)); /* fail-safe: INVALID (= 0) until proven otherwise */
+        static const cnc_result_t zero_result; /* all zero: cls = INVALID */
+        *out = zero_result; /* fail-safe until proven otherwise */
     }
     if (st != CNC_STATUS_OK) {
         return st;
     }
 
-    sample_set_t outliers;
-    memset(&outliers, 0, sizeof(outliers));
+    sample_set_t outliers = {{0u}};
 
     const int out_of_range = scan_extremes(samples, n, cfg, &out->p2p_uv);
     const line_fit_t fit = fit_line(samples, n, NULL);

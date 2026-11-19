@@ -8,7 +8,15 @@ BUILD   := build
 SRC     := src/cell_noise.c
 UNIT    := tests/unit/test_cell_noise.c
 
-.PHONY: all lib unit sil test coverage memcheck sanitize optlevels lint trace clean
+.PHONY: all lib unit sil test coverage memcheck sanitize optlevels lint trace divcount \
+        arm qemu arm-report clean
+
+# ---- Cortex-M4 target (QEMU mps2-an386) ------------------------------------
+ARM_CC    ?= arm-none-eabi-gcc
+ARM_SIZE  ?= arm-none-eabi-size
+ARM_ARCH  := -mcpu=cortex-m4 -mthumb -mfloat-abi=soft
+ARM_BUILD := $(BUILD)/arm
+QEMU      ?= qemu-system-arm
 
 all: lib $(BUILD)/unit_tests
 
@@ -30,7 +38,7 @@ unit: $(BUILD)/unit_tests
 sil: lib
 	python3 -m pytest tests/sil -q
 
-test: unit sil trace lint
+test: unit sil divcount trace lint
 
 # Line/branch coverage of the C code from the unit tests (gcov)
 coverage: | $(BUILD)
@@ -63,6 +71,37 @@ lint:
 
 trace:
 	python3 tools/trace_matrix.py
+
+# REQ-034: number of 64-bit divisions per window must not grow with the window length
+divcount:
+	python3 tools/count_divisions.py
+
+# Library alone, freestanding (no libc headers), as it would go into firmware
+$(ARM_BUILD)/cell_noise.o: $(SRC) include/cell_noise.h
+	mkdir -p $(ARM_BUILD)
+	$(ARM_CC) $(ARM_ARCH) $(CSTD) $(WARN) -Os -ffreestanding -fstack-usage -Iinclude -c $(SRC) -o $@
+
+# Unit tests linked for the target, output via semihosting
+$(ARM_BUILD)/unit_tests.elf: $(SRC) $(UNIT) target/startup.c target/mps2_an386.ld
+	mkdir -p $(ARM_BUILD)
+	$(ARM_CC) $(ARM_ARCH) $(CSTD) -O2 -g -Wall -Wextra -Werror -Iinclude -Itests/unit \
+	  -nostartfiles -T target/mps2_an386.ld --specs=rdimon.specs \
+	  target/startup.c $(SRC) $(UNIT) -o $@ -Wl,--gc-sections
+
+arm: $(ARM_BUILD)/cell_noise.o $(ARM_BUILD)/unit_tests.elf
+
+# Run the C unit tests on an emulated Cortex-M4
+qemu: $(ARM_BUILD)/unit_tests.elf
+	timeout 120 $(QEMU) -machine mps2-an386 -nographic -monitor none -serial none \
+	  -semihosting-config enable=on,target=native -kernel $< | tee $(ARM_BUILD)/qemu.log
+	grep -q " 0 failed" $(ARM_BUILD)/qemu.log
+
+# Flash / RAM / stack of the library on the target
+arm-report: $(ARM_BUILD)/cell_noise.o
+	@echo "Library size on Cortex-M4 (-Os):"
+	@$(ARM_SIZE) $<
+	@echo "Stack usage per function (bytes):"
+	@cat $(ARM_BUILD)/cell_noise.su
 
 clean:
 	rm -rf $(BUILD)
