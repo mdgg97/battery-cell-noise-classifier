@@ -112,9 +112,9 @@ Current status: 37 C unit tests (on the host and on Cortex-M4), 108 SIL tests + 
 | Resource | Value |
 |----------|-------|
 | Flash (noise classifier) | 1.8 KB |
-| Flash (internal resistance) | see CI step summary |
+| Flash (internal resistance) | 1.2 KB |
 | Static RAM | 0 bytes |
-| Worst-case stack | about 300 bytes (`cnc_classify` 224 + `fit_line` 72) |
+| Worst-case stack | about 430 bytes (`cir_estimate` 128 + `cnc_classify` 224 + `fit_line` 72) |
 | 64-bit divisions per 256-sample window | 8 (was 515) |
 
 QEMU is not cycle-accurate, so execution time still needs a real board.
